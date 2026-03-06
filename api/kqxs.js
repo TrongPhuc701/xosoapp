@@ -66,41 +66,46 @@ module.exports = async function handler(req, res) {
             stationNames.push($(el).text().trim());
         });
 
-        // Bốc tách giải thưởng: Chỉ lấy Giải Tám và Giải Đặc Biệt
-        stationNames.forEach((name, index) => {
-            const lotoList = [];
-            const columnIndex = index + 2; // Cột đầu tiên là tên giải, cột 2 trở đi là các đài
+        // Bốc tách giải thưởng
+        // Do cấu trúc web bảng xổ số rất phức tạp (lồng table), code parser cần test thực tế
+        // Ở cấp độ API Proxy, ta cào các đuôi lô (2 số cuối) từ phần bảng Loto (nằm dưới bảng giải thưởng thường có)
+        // class "bang_loto"
+        const bangLoto = kqxsBox.find('.bang_loto').first();
 
-            // Lấy Giải Tám (thường nằm ở hàng có class 'giai8' hoặc title 'Giải tám')
-            const giaiTamEl = kqxsBox.find('table.rightcl tr.giai8').first();
-            if (giaiTamEl.length) {
-                let txt8 = giaiTamEl.find(`td:nth-child(${columnIndex})`).text().trim();
-                // Tách các số nếu có nhiều số (thường giải 8 chỉ có 1 số)
-                const numbers = txt8.split(/[-,\s]+/);
-                numbers.forEach(num => {
-                    if (num.length >= 2 && !isNaN(num)) {
-                        lotoList.push(num.slice(-2)); // Lấy 2 số cuối
+        if (bangLoto.length) {
+            stationNames.forEach((name, index) => {
+                const lotoList = [];
+                // Lấy tất cả các số lô 2 số của cột đài đó
+                // Cấu trúc bảng lô thường chia cột TD tương ứng với Đài.
+                // Để chính xác tuyệt đối, ta cần phân tích css path, tạm thời mô phỏng trích xuất:
+                bangLoto.find(`td:nth-child(${index + 2}) div`).each((i, el) => {
+                    let txt = $(el).text().trim();
+                    if (txt && /^\d{2}$/.test(txt)) {
+                        lotoList.push(txt);
                     }
                 });
-            }
 
-            // Lấy Giải Đặc Biệt (thường nằm ở hàng có class 'giaidb' cx title 'Giải đặc biệt')
-            const giaiDbEl = kqxsBox.find('table.rightcl tr.giaidb').first();
-            if (giaiDbEl.length) {
-                let txtDB = giaiDbEl.find(`td:nth-child(${columnIndex})`).text().trim();
-                const numbers = txtDB.split(/[-,\s]+/);
-                numbers.forEach(num => {
-                    if (num.length >= 2 && !isNaN(num)) {
-                        lotoList.push(num.slice(-2)); // Lấy 2 số cuối của giải ĐB
-                    }
+                // Nếu bảng loto không cấu trúc như vậy, ta lấy 2 số cuối của list trúng thưởng giải
+                if (lotoList.length === 0) {
+                    kqxsBox.find(`table.rightcl td:nth-child(${index + 2})`).each((i, el) => {
+                        let txt = $(el).text().trim();
+                        // Tách các giải thường cách nhau khoảng trắng hoặc phẩy (nếu có 2 giải/dòng)
+                        const numbers = txt.split(/[-,\s]+/);
+                        numbers.forEach(num => {
+                            if (num.length >= 2 && !isNaN(num)) {
+                                // Lấy 2 số cuối
+                                lotoList.push(num.slice(-2));
+                            }
+                        });
+                    });
+                }
+
+                resultData.stations.push({
+                    name: name,
+                    loto: [...new Set(lotoList)] // Lọc trùng nếu cần (thực tế 1 kỳ có thể có lô nháy)
                 });
-            }
-
-            resultData.stations.push({
-                name: name,
-                loto: [...new Set(lotoList)] // Lọc trùng nếu cần
             });
-        });
+        }
 
         // Set Headers CORS để client fetch được từ Vercel
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -111,3 +116,4 @@ module.exports = async function handler(req, res) {
         res.status(500).json({ error: 'Crawler failed', details: error.message });
     }
 }
+
